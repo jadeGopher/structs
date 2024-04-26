@@ -1451,3 +1451,30 @@ func TestMap_InterfaceTypeWithMapValue(t *testing.T) {
 
 	_ = Map(a)
 }
+
+func TestAnonymousFieldStruct(t *testing.T) {
+	type A struct {
+		Name string `structs:"name"`
+	}
+
+	a := struct {
+		Field int
+		A
+	}{
+		Field: 100,
+		A:     A{Name: "check"},
+	}
+
+	defer func() {
+		err := recover()
+		if err != nil {
+			t.Error("Converting Map with an interface{} type with map value should not panic")
+		}
+	}()
+
+	result := Map(a)
+
+	if val, exists := result["name"]; !exists || val != "check" {
+		t.Errorf("Value for anonymous field must exist")
+	}
+}
