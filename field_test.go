@@ -29,7 +29,7 @@ type Bar struct {
 	g []string
 }
 
-func newStruct() *Struct {
+func newStruct() *Struct[*Foo] {
 	b := &Bar{
 		E: "example",
 		F: 2,

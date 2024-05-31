@@ -1478,3 +1478,94 @@ func TestAnonymousFieldStruct(t *testing.T) {
 		t.Errorf("Value for anonymous field must exist")
 	}
 }
+
+func TestStruct_SetValuesFromMap(t *testing.T) {
+	t.Parallel()
+
+	type args struct {
+		values map[string]interface{}
+	}
+
+	type Nested struct {
+		D int    `json:"d"`
+		E string `json:"e"`
+	}
+
+	type some struct {
+		A           int `json:"tag"`
+		B           string
+		C           int
+		MapField    map[string]string
+		Field       []int
+		Now         time.Time
+		StructField Nested `json:"struct_field"`
+		Nested
+	}
+
+	tests := []struct {
+		name string
+		val  *Struct[*some]
+		args args
+		want *some
+	}{
+		{
+			name: "simple_struct",
+			val: New(
+				&some{
+					A:        100,
+					B:        "value",
+					C:        5,
+					MapField: map[string]string{"key": "value"},
+					Field:    nil,
+				},
+			),
+			args: args{
+				values: map[string]interface{}{
+					"tag":      int(110),
+					"B":        "new_value",
+					"MapField": map[string]string{"new_key": "value"},
+					"Field":    []int{1, 2, 3},
+					"struct_field": map[string]interface{}{
+						"d": 100,
+						"e": "nested_string",
+					},
+					"Now": time.Date(2024, 01, 10, 10, 11, 0, 0, time.UTC),
+					"d":   120,
+					"e":   "nested",
+				},
+			},
+			want: &some{
+				A:        110,
+				B:        "new_value",
+				C:        5,
+				MapField: map[string]string{"new_key": "value"},
+				Field:    []int{1, 2, 3},
+				StructField: Nested{
+					D: 100,
+					E: "nested_string",
+				},
+				Now: time.Date(2024, 01, 10, 10, 11, 0, 0, time.UTC),
+				Nested: Nested{
+					D: 120,
+					E: "nested",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(
+			tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				tt.val.TagName = "json"
+
+				tt.val.SetValuesFromMap(tt.args.values)
+
+				if !reflect.DeepEqual(tt.val.Raw(), tt.want) {
+					t.Errorf("not equal")
+				}
+			},
+		)
+	}
+}

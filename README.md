@@ -1,6 +1,8 @@
 # Fork reason
 
-Support for embedding anonymous fields without "flatten" tag.
+Support for embedded anonymous fields without "flatten" tag.
+
+- SetValuesFromMap function added.
 
 # Archived project. No maintenance.
 

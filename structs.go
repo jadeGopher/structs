@@ -15,20 +15,23 @@ var (
 
 // Struct encapsulates a struct type to provide several high level functions
 // around the struct.
-type Struct struct {
-	raw     interface{}
+type Struct[T any] struct {
+	raw     T
 	value   reflect.Value
 	TagName string
 }
 
 // New returns a new *Struct with the struct s. It panics if the s's kind is
 // not struct.
-func New(s interface{}) *Struct {
-	return &Struct{
+func New[T any](s T) *Struct[T] {
+	converted := strctVal(s)
+	result := &Struct[T]{
 		raw:     s,
-		value:   strctVal(s),
+		value:   converted,
 		TagName: DefaultTagName,
 	}
+
+	return result
 }
 
 // Map converts the given struct to a map[string]interface{}, where the keys
@@ -77,15 +80,72 @@ func New(s interface{}) *Struct {
 //
 // Note that only exported fields of a struct can be accessed, non exported
 // fields will be neglected.
-func (s *Struct) Map() map[string]interface{} {
+func (s *Struct[T]) Map() map[string]interface{} {
 	out := make(map[string]interface{})
 	s.FillMap(out)
 	return out
 }
 
+func setValueFromMapRec(value reflect.Value, newValues map[string]interface{}, tagName string) {
+	if newValues == nil {
+		return
+	}
+
+	for _, field := range structFields(value, tagName) {
+		name := field.Name
+		val := value.FieldByName(name)
+
+		tag, _ := parseTag(field.Tag.Get(tagName))
+		if tag != "" {
+			name = tag
+		}
+
+		// special case for anonymous fields
+		if field.Anonymous && val.Kind() == reflect.Struct {
+			setValueFromMapRec(val, newValues, tagName)
+		}
+
+		if newValue, ok := newValues[name]; ok && val.CanSet() {
+			if m, ok := newValue.(map[string]interface{}); ok && val.Kind() == reflect.Struct {
+				setValueFromMapRec(val, m, tagName)
+			}
+
+			reflectedNewValue := reflect.ValueOf(newValue)
+			if val.Type() != reflectedNewValue.Type() {
+				continue
+			}
+
+			val.Set(reflectedNewValue)
+		}
+	}
+}
+
+// SetValuesFromMap allows to apply map values to struct. Map must have similar structure.
+// Provided struct must have a pointer type.
+func (s *Struct[T]) SetValuesFromMap(values map[string]interface{}) {
+	if values == nil {
+		return
+	}
+
+	setValueFromMapRec(s.value, values, s.TagName)
+
+	// type of s.value can be changed, so we need to retrieve original type
+	original := reflect.ValueOf(s.raw)
+	original.Elem().Set(s.value)
+
+	val, ok := original.Interface().(T)
+	if ok {
+		s.raw = val
+	}
+}
+
+func (s *Struct[T]) Raw() T {
+	return s.raw
+}
+
 // FillMap is the same as Map. Instead of returning the output, it fills the
 // given map.
-func (s *Struct) FillMap(out map[string]interface{}) {
+func (s *Struct[T]) FillMap(out map[string]interface{}) {
 	if out == nil {
 		return
 	}
@@ -171,7 +231,7 @@ func (s *Struct) FillMap(out map[string]interface{}) {
 //
 // Note that only exported fields of a struct can be accessed, non exported
 // fields  will be neglected.
-func (s *Struct) Values() []interface{} {
+func (s *Struct[T]) Values() []interface{} {
 	fields := s.structFields()
 
 	var t []interface{}
@@ -219,7 +279,7 @@ func (s *Struct) Values() []interface{} {
 //	Field bool `structs:"-"`
 //
 // It panics if s's kind is not struct.
-func (s *Struct) Fields() []*Field {
+func (s *Struct[T]) Fields() []*Field {
 	return getFields(s.value, s.TagName)
 }
 
@@ -230,7 +290,7 @@ func (s *Struct) Fields() []*Field {
 //	Field bool `structs:"-"`
 //
 // It panics if s's kind is not struct.
-func (s *Struct) Names() []string {
+func (s *Struct[T]) Names() []string {
 	fields := getFields(s.value, s.TagName)
 
 	names := make([]string, len(fields))
@@ -272,7 +332,7 @@ func getFields(v reflect.Value, tagName string) []*Field {
 
 // Field returns a new Field struct that provides several high level functions
 // around a single struct field entity. It panics if the field is not found.
-func (s *Struct) Field(name string) *Field {
+func (s *Struct[T]) Field(name string) *Field {
 	f, ok := s.FieldOk(name)
 	if !ok {
 		panic("field not found")
@@ -284,7 +344,7 @@ func (s *Struct) Field(name string) *Field {
 // FieldOk returns a new Field struct that provides several high level functions
 // around a single struct field entity. The boolean returns true if the field
 // was found.
-func (s *Struct) FieldOk(name string) (*Field, bool) {
+func (s *Struct[T]) FieldOk(name string) (*Field, bool) {
 	t := s.value.Type()
 
 	field, ok := t.FieldByName(name)
@@ -315,7 +375,7 @@ func (s *Struct) FieldOk(name string) (*Field, bool) {
 //
 // Note that only exported fields of a struct can be accessed, non exported
 // fields  will be neglected. It panics if s's kind is not struct.
-func (s *Struct) IsZero() bool {
+func (s *Struct[T]) IsZero() bool {
 	fields := s.structFields()
 
 	for _, field := range fields {
@@ -362,7 +422,7 @@ func (s *Struct) IsZero() bool {
 //
 // Note that only exported fields of a struct can be accessed, non exported
 // fields  will be neglected. It panics if s's kind is not struct.
-func (s *Struct) HasZero() bool {
+func (s *Struct[T]) HasZero() bool {
 	fields := s.structFields()
 
 	for _, field := range fields {
@@ -395,14 +455,14 @@ func (s *Struct) HasZero() bool {
 
 // Name returns the structs's type name within its package. For more info refer
 // to Name() function.
-func (s *Struct) Name() string {
+func (s *Struct[T]) Name() string {
 	return s.value.Type().Name()
 }
 
 // structFields returns the exported struct fields for a given s struct. This
 // is a convenient helper method to avoid duplicate code in some of the
 // functions.
-func (s *Struct) structFields() []reflect.StructField {
+func (s *Struct[T]) structFields() []reflect.StructField {
 	t := s.value.Type()
 
 	var f []reflect.StructField
@@ -425,10 +485,33 @@ func (s *Struct) structFields() []reflect.StructField {
 	return f
 }
 
-func strctVal(s interface{}) reflect.Value {
+func structFields(value reflect.Value, tagName string) []reflect.StructField {
+	t := value.Type()
+
+	var f []reflect.StructField
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		// we can't access the value of unexported fields
+		if field.PkgPath != "" {
+			continue
+		}
+
+		// don't check if it's omitted
+		if tag := field.Tag.Get(tagName); tag == "-" {
+			continue
+		}
+
+		f = append(f, field)
+	}
+
+	return f
+}
+
+func strctVal[T any](s T) reflect.Value {
 	v := reflect.ValueOf(s)
 
-	// if pointer get the underlying element≤
+	// if pointer get the underlying element
 	for v.Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
@@ -506,7 +589,7 @@ func Name(s interface{}) string {
 
 // nested retrieves recursively all types for the given value and returns the
 // nested value.
-func (s *Struct) nested(val reflect.Value) interface{} {
+func (s *Struct[T]) nested(val reflect.Value) interface{} {
 	var finalVal interface{}
 
 	v := reflect.ValueOf(val.Interface())
